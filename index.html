@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="et">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ToDo Rakendus</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✅</text></svg>">
+    <link rel="stylesheet" href="styles.css"></link>
+</head>
+<body>
+    <div class="container">
+        <h1>ToDo Rakendus</h1>
+
+        <div id="auth-section" class="auth-section">
+            <h2>Sisene või registreeri</h2>
+            
+            <div class="info-box">
+                <p><strong>Oluline teave:</strong></p>
+                <ul>
+                    <li>Kasutajanimi peab olema kehtiv e-posti aadress</li>
+                    <li>Parool peab olema vähemalt 6 tähemärki pikk</li>
+                </ul>
+            </div>
+            
+            <div class="input-group">
+                <input type="email" id="username" placeholder="E-posti aadress" value="test@example.com">
+            </div>
+            
+            <div class="input-group">
+                <input type="password" id="password" placeholder="Parool" value="test123">
+            </div>
+            
+            <div class="flex-row">
+                <button id="login-btn">Sisene</button>
+                <button id="register-btn">Registreeri</button>
+            </div>
+            
+            <div class="test-credentials">
+                <p><strong>Testimiseks:</strong> test@example.com / test123</p>
+            </div>
+        </div>
+
+        <div id="task-section" class="task-section">
+            <div class="header-bar">
+                <h2>Minu ülesanded</h2>
+                <button id="logout-btn">Logi välja</button>
+            </div>
+
+            <div class="add-task-container">
+                <input type="text" id="new-task" placeholder="Sisesta uus ülesanne...">
+                <button id="add-task-btn">Lisa ülesanne</button>
+            </div>
+
+            <div id="task-list"></div>
+        </div>
+
+        <div id="message" class="message"></div>
+    </div>
+
+    <script>
+        // API Configuration
+        const API_BASE_URL = 'http://localhost:3001'; // Proxy server
+        let userToken = null;
+        let currentUser = null;
+
+        // Helper function to show messages
+        function showMessage(text, isError = false) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = text;
+            messageDiv.className = `message ${isError ? 'error' : 'success'}`;
+            messageDiv.style.display = 'block';
+            setTimeout(() => messageDiv.style.display = 'none', 5000);
+        }
+
+        // Email validation
+        function validateEmail(email) {
+            const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return re.test(email);
+        }
+
+        // Authentication Functions
+        async function registerUser(username, password) {
+            try {
+                // Validate email
+                if (!validateEmail(username)) {
+                    throw new Error('Palun sisesta kehtiv e-posti aadress');
+                }
+                
+                // Validate password length
+                if (password.length < 6) {
+                    throw new Error('Parool peab olema vähemalt 6 tähemärki pikk');
+                }
+                
+                const response = await fetch(`${API_BASE_URL}/proxy/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username,
+                        newPassword: password
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    const errorMsg = data.error || data.message || 'Registreerimine ebaõnnestus';
+                    throw new Error(errorMsg);
+                }
+
+                // Automatically login after registration
+                return loginUser(username, password);
+            } catch (error) {
+                console.error('Registration error:', error);
+                throw error;
+            }
+        }
+
+        async function loginUser(username, password) {
+            try {
+                // Validate email
+                if (!validateEmail(username)) {
+                    throw new Error('Palun sisesta kehtiv e-posti aadress');
+                }
+                
+                const response = await fetch(`${API_BASE_URL}/proxy/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username,
+                        password
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    const errorMsg = data.error || data.message || 'Sisselogimine ebaõnnestus';
+                    throw new Error(errorMsg);
+                }
+
+                if (!data.access_token) {
+                    throw new Error('Autentimistõendit ei saadud');
+                }
+
+                // Store the token and user data
+                userToken = data.access_token;
+                currentUser = {
+                    id: data.id,
+                    username: data.username
+                };
+                
+                // Store in localStorage
+                localStorage.setItem('todoToken', userToken);
+                localStorage.setItem('todoUser', JSON.stringify(currentUser));
+                
+                return data;
+            } catch (error) {
+                console.error('Login error:', error);
+                throw error;
+            }
+        }
+
+        // Task Management Functions
+        async function getAllTasks() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/proxy/tasks`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${userToken}`
+                    }
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error('Ülesannete laadimine ebaõnnestus');
+                }
+
+                return data;
+            } catch (error) {
+                console.error('Get tasks error:', error);
+                throw error;
+            }
+        }
+
+        async function createTask(title, desc = '') {
+            try {
+                const response = await fetch(`${API_BASE_URL}/proxy/tasks`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${userToken}`
+                    },
+                    body: JSON.stringify({
+                        title,
+                        desc
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error('Ülesande loomine ebaõnnestus');
+                }
+
+                return data;
+            } catch (error) {
+                console.error('Create task error:', error);
+                throw error;
+            }
+        }
+
+        async function updateTask(taskId, updates) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/proxy/tasks/${taskId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${userToken}`
+                    },
+                    body: JSON.stringify(updates)
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error('Ülesande uuendamine ebaõnnestus');
+                }
+
+                return data;
+            } catch (error) {
+                console.error('Update task error:', error);
+                throw error;
+            }
+        }
+
+        async function deleteTask(taskId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/proxy/tasks/${taskId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${userToken}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Ülesande kustutamine ebaõnnestus');
+                }
+
+                return true;
+            } catch (error) {
+                console.error('Delete task error:', error);
+                throw error;
+            }
+        }
+
+        // UI Functions
+        async function handleAuth(isLogin = true) {
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value.trim();
+            
+            try {
+                if (isLogin) {
+                    await loginUser(username, password);
+                    showMessage('Sisselogimine õnnestus!');
+                } else {
+                    await registerUser(username, password);
+                    showMessage('Registreerimine õnnestus!');
+                }
+                
+                // Hide auth section, show task section
+                document.getElementById('auth-section').style.display = 'none';
+                document.getElementById('task-section').style.display = 'block';
+                
+                // Load tasks
+                await loadTasks();
+            } catch (error) {
+                showMessage(error.message || 'Autentimine ebaõnnestus', true);
+            }
+        }
+
+        async function loadTasks() {
+            try {
+                const tasks = await getAllTasks();
+                renderTasks(tasks);
+            } catch (error) {
+                showMessage('Ülesannete laadimine ebaõnnestus', true);
+            }
+        }
+
+        function renderTasks(tasks) {
+            const taskList = document.getElementById('task-list');
+            taskList.innerHTML = '';
+            
+            if (!tasks || tasks.length === 0) {
+                taskList.innerHTML = '<p>Ülesanded puuduvad. Lisa esimene ülesanne!</p>';
+                return;
+            }
+
+            tasks.forEach(task => {
+                const taskEl = document.createElement('div');
+                taskEl.className = `task-item ${task.marked_as_done ? 'completed' : ''}`;
+                taskEl.innerHTML = `
+                    <input type="checkbox" ${task.marked_as_done ? 'checked' : ''} 
+                           data-id="${task.id}" onchange="toggleTaskDone(this)">
+                    <span class="task-text">${task.title}</span>
+                    <button class="delete-btn" data-id="${task.id}">Kustuta</button>
+                `;
+                taskList.appendChild(taskEl);
+            });
+        }
+
+        async function addNewTask() {
+            const title = document.getElementById('new-task').value.trim();
+            if (!title) {
+                showMessage('Palun sisesta ülesande nimi', true);
+                return;
+            }
+            
+            try {
+                await createTask(title);
+                document.getElementById('new-task').value = '';
+                await loadTasks();
+                showMessage('Ülesanne lisatud!');
+            } catch (error) {
+                showMessage('Ülesande lisamine ebaõnnestus', true);
+            }
+        }
+
+        async function toggleTaskDone(checkbox) {
+            const taskId = checkbox.dataset.id;
+            const marked_as_done = checkbox.checked;
+            
+            try {
+                await updateTask(taskId, { marked_as_done });
+            } catch (error) {
+                checkbox.checked = !marked_as_done; // Revert if failed
+                showMessage('Ülesande uuendamine ebaõnnestus', true);
+            }
+        }
+
+        async function handleDeleteTask(taskId) {
+            if (!confirm('Kas olete kindel, et soovite selle ülesande kustutada?')) {
+                return;
+            }
+            
+            try {
+                await deleteTask(taskId);
+                await loadTasks();
+                showMessage('Ülesanne kustutatud!');
+            } catch (error) {
+                showMessage('Ülesande kustutamine ebaõnnestus', true);
+            }
+        }
+
+        function logout() {
+            userToken = null;
+            currentUser = null;
+            localStorage.removeItem('todoToken');
+            localStorage.removeItem('todoUser');
+            document.getElementById('auth-section').style.display = 'block';
+            document.getElementById('task-section').style.display = 'none';
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            showMessage('Olete edukalt välja logitud');
+        }
+
+        // Event Listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            // Check if already logged in (from localStorage)
+            const savedToken = localStorage.getItem('todoToken');
+            const savedUser = localStorage.getItem('todoUser');
+            
+            if (savedToken && savedUser) {
+                userToken = savedToken;
+                currentUser = JSON.parse(savedUser);
+                document.getElementById('auth-section').style.display = 'none';
+                document.getElementById('task-section').style.display = 'block';
+                loadTasks();
+            }
+        });
+
+        document.getElementById('login-btn').addEventListener('click', () => handleAuth(true));
+        document.getElementById('register-btn').addEventListener('click', () => handleAuth(false));
+        document.getElementById('logout-btn').addEventListener('click', logout);
+        document.getElementById('add-task-btn').addEventListener('click', addNewTask);
+        document.getElementById('new-task').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addNewTask();
+        });
+
+        // Event delegation for delete buttons
+        document.getElementById('task-list').addEventListener('click', (e) => {
+            if (e.target.classList.contains('delete-btn')) {
+                handleDeleteTask(e.target.dataset.id);
+            }
+        });
+
+        // Make functions available globally for inline handlers
+        window.toggleTaskDone = toggleTaskDone;
+    </script>
+</body>
+</html>
